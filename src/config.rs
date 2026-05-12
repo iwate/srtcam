@@ -1,0 +1,137 @@
+use std::fs;
+use std::path::PathBuf;
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use serde::Deserialize;
+
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub listen_port: u16,
+    pub srt_latency_ms: u32,
+    pub loopback_device: PathBuf,
+    pub dummy_image: PathBuf,
+    pub width: u32,
+    pub height: u32,
+    pub fps: u32,
+    pub live_timeout_ms: u64,
+    pub ffmpeg_bin: String,
+}
+
+#[derive(Debug, Parser)]
+#[command(name = "rstcam", about = "SRT to v4l2loopback bridge")]
+pub struct Cli {
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+    #[arg(long)]
+    pub listen_port: Option<u16>,
+    #[arg(long)]
+    pub srt_latency_ms: Option<u32>,
+    #[arg(long)]
+    pub loopback_device: Option<PathBuf>,
+    #[arg(long)]
+    pub dummy_image: Option<PathBuf>,
+    #[arg(long)]
+    pub width: Option<u32>,
+    #[arg(long)]
+    pub height: Option<u32>,
+    #[arg(long)]
+    pub fps: Option<u32>,
+    #[arg(long)]
+    pub live_timeout_ms: Option<u64>,
+    #[arg(long)]
+    pub ffmpeg_bin: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FileConfig {
+    listen_port: Option<u16>,
+    srt_latency_ms: Option<u32>,
+    loopback_device: Option<PathBuf>,
+    dummy_image: Option<PathBuf>,
+    width: Option<u32>,
+    height: Option<u32>,
+    fps: Option<u32>,
+    live_timeout_ms: Option<u64>,
+    ffmpeg_bin: Option<String>,
+}
+
+impl AppConfig {
+    pub fn load(cli: Cli) -> Result<Self> {
+        let file_cfg = if let Some(path) = &cli.config {
+            let raw = fs::read_to_string(path)
+                .with_context(|| format!("failed to read config file: {}", path.display()))?;
+            toml::from_str::<FileConfig>(&raw)
+                .with_context(|| format!("failed to parse TOML config: {}", path.display()))?
+        } else {
+            FileConfig::default()
+        };
+
+        let cfg = Self {
+            listen_port: cli
+                .listen_port
+                .or(file_cfg.listen_port)
+                .unwrap_or(5000),
+            srt_latency_ms: cli
+                .srt_latency_ms
+                .or(file_cfg.srt_latency_ms)
+                .unwrap_or(120),
+            loopback_device: cli
+                .loopback_device
+                .or(file_cfg.loopback_device)
+                .unwrap_or_else(|| PathBuf::from("/dev/video10")),
+            dummy_image: cli
+                .dummy_image
+                .or(file_cfg.dummy_image)
+                .unwrap_or_else(|| PathBuf::from("dummy.png")),
+            width: cli.width.or(file_cfg.width).unwrap_or(1280),
+            height: cli.height.or(file_cfg.height).unwrap_or(720),
+            fps: cli.fps.or(file_cfg.fps).unwrap_or(30),
+            live_timeout_ms: cli
+                .live_timeout_ms
+                .or(file_cfg.live_timeout_ms)
+                .unwrap_or(800),
+            ffmpeg_bin: cli
+                .ffmpeg_bin
+                .or(file_cfg.ffmpeg_bin)
+                .unwrap_or_else(|| "ffmpeg".to_string()),
+        };
+
+        cfg.validate()?;
+        Ok(cfg)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.listen_port == 0 {
+            anyhow::bail!("listen_port must be > 0");
+        }
+        if self.fps == 0 {
+            anyhow::bail!("fps must be > 0");
+        }
+        if self.width == 0 || self.height == 0 {
+            anyhow::bail!("width/height must be > 0");
+        }
+        if self.srt_latency_ms == 0 {
+            anyhow::bail!("srt_latency_ms must be > 0");
+        }
+        if !self.loopback_device.exists() {
+            anyhow::bail!(
+                "loopback device does not exist: {}",
+                self.loopback_device.display()
+            );
+        }
+        if !self.dummy_image.exists() {
+            anyhow::bail!("dummy image does not exist: {}", self.dummy_image.display());
+        }
+        Ok(())
+    }
+
+    pub fn frame_size_bytes(&self) -> usize {
+        // yuyv422 => 2 bytes per pixel
+        (self.width as usize) * (self.height as usize) * 2
+    }
+
+    pub fn frame_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(1.0 / self.fps as f64)
+    }
+}

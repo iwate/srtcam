@@ -1,0 +1,22 @@
+# SRT listener port (LISTEN mode)
+listen_port = 5000
+
+# SRT receiver latency in milliseconds
+srt_latency_ms = 120
+
+# v4l2loopback output device
+loopback_device = "/dev/video10"
+
+# Dummy image path (used when startup/disconnected/no-live)
+dummy_image = "dummy.png"
+
+# Output format to /dev/video10 (YUYV422 raw)
+width = 1280
+height = 720
+fps = 30
+
+# If no live frame arrives within this time, fallback to dummy
+live_timeout_ms = 800
+
+# ffmpeg binary name/path
+ffmpeg_bin = "ffmpeg"
