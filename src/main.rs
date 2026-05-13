@@ -15,7 +15,7 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use crate::config::{AppConfig, Cli};
-use crate::dummy::load_dummy_yuyv;
+use crate::dummy::black_dummy_yuyv;
 use crate::live_ffmpeg_next::spawn_live_reader_ffmpeg_next;
 use crate::output::run_output_loop;
 
@@ -47,7 +47,7 @@ fn main() -> Result<()> {
         })?;
     }
 
-    let dummy_frame = load_dummy_yuyv(&cfg.dummy_image, cfg.frame_width, cfg.frame_height)?;
+    let dummy_frame = black_dummy_yuyv(cfg.frame_width, cfg.frame_height);
 
     let (tx, rx) = bounded(cfg.live_channel_capacity);
     let (recycle_tx, recycle_rx) = bounded::<Vec<u8>>(2);

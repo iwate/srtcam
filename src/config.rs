@@ -10,7 +10,6 @@ pub struct AppConfig {
     pub listen_port: u16,
     pub srt_latency_ms: u32,
     pub loopback_device: PathBuf,
-    pub dummy_image: PathBuf,
     pub frame_width: u32,
     pub frame_height: u32,
     pub fps: u32,
@@ -40,8 +39,6 @@ pub struct Cli {
     #[arg(long)]
     pub loopback_device: Option<PathBuf>,
     #[arg(long)]
-    pub dummy_image: Option<PathBuf>,
-    #[arg(long)]
     pub frame_width: Option<u32>,
     #[arg(long)]
     pub frame_height: Option<u32>,
@@ -68,7 +65,6 @@ struct FileConfig {
     listen_port: Option<u16>,
     srt_latency_ms: Option<u32>,
     loopback_device: Option<PathBuf>,
-    dummy_image: Option<PathBuf>,
     frame_width: Option<u32>,
     frame_height: Option<u32>,
     width: Option<u32>,
@@ -123,10 +119,6 @@ impl AppConfig {
                 .loopback_device
                 .or(file_cfg.loopback_device)
                 .unwrap_or_else(|| PathBuf::from("/dev/video10")),
-            dummy_image: cli
-                .dummy_image
-                .or(file_cfg.dummy_image)
-                .unwrap_or_else(|| PathBuf::from("dummy.png")),
             frame_width: cli
                 .frame_width
                 .or(cli.width)
@@ -187,9 +179,6 @@ impl AppConfig {
                 "loopback device does not exist: {}",
                 self.loopback_device.display()
             );
-        }
-        if !self.dummy_image.exists() {
-            anyhow::bail!("dummy image does not exist: {}", self.dummy_image.display());
         }
         Ok(())
     }

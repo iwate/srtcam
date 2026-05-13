@@ -2,14 +2,14 @@
 
 Linux 向けの SRT 受信サーバーです。受信した映像を v4l2loopback デバイスへ流し込みます。
 
-送信側が未接続でも映像出力を止めず、起動直後・切断時・受信停止時はダミー画像を連続送出します。これにより、デバイスを常に Capture として認識させ続けます。
+送信側が未接続でも映像出力を止めず、起動直後・切断時・受信停止時は黒画面（`#000000`）を連続送出します。これにより、デバイスを常に Capture として認識させ続けます。
 
 ## できること
 
 - SRT を LISTEN モードで待受（既定: 5000）
 - 受信映像を /dev/video10（設定可）へ出力
 - 音声は無視（映像のみ）
-- ライブ映像が無い間はダミー画像を出力
+- ライブ映像が無い間は黒画面（`#000000`）を出力
 - フレームサイズを固定パラメータで指定
 - `analyzeduration=0` を設定で利用可能（既定値 0）
 
@@ -46,7 +46,6 @@ listen_port = 5000
 srt_latency_ms = 120
 latency_profile = "balanced"
 loopback_device = "/dev/video10"
-dummy_image = "dummy.png"
 frame_width = 1280
 frame_height = 720
 fps = 30
@@ -97,8 +96,8 @@ ffplay -f v4l2 /dev/video10
 ## 期待される挙動
 
 1. 送信前: ダミー画像を表示し続ける
-2. 送信中: ダミーからライブ映像へ切り替わる
-3. 送信停止時: ライブからダミーへ自動復帰し、待受継続
+2. 送信中: 黒画面からライブ映像へ切り替わる
+3. 送信停止時: ライブから黒画面へ自動復帰し、待受継続
 
 ## 主な設定項目
 
@@ -107,7 +106,6 @@ ffplay -f v4l2 /dev/video10
 - `frame_width`, `frame_height`: 固定フレームサイズ（既定 HD）
 - `fps`: 出力 FPS
 - `loopback_device`: ループバックデバイス
-- `dummy_image`: ダミー画像パス
 - `ffmpeg_analyzeduration_us`: ffmpeg の analyzeduration
 - `ffmpeg_probesize_bytes`: ffmpeg の probesize
 

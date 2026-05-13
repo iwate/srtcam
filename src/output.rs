@@ -23,7 +23,7 @@ pub fn run_output_loop(
 ) -> Result<()> {
     let mut out = open_device(cfg)?;
     let live_interval = cfg.frame_interval();
-    let dummy_interval = Duration::from_millis(5000); // 0.2 fps for static dummy image
+    let dummy_interval = Duration::from_millis(5000); // 0.2 fps for static black frame
     let live_timeout = Duration::from_millis(cfg.live_timeout_ms);
 
     let mut last_live_frame: Option<Vec<u8>> = None;

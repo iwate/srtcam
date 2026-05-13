@@ -10,9 +10,6 @@ latency_profile = "ultra-low"
 # v4l2loopback output device
 loopback_device = "/dev/video10"
 
-# Dummy image path (used when startup/disconnected/no-live)
-dummy_image = "dummy.png"
-
 # Fixed frame size for decode/output path (default: HD)
 frame_width = 1280
 frame_height = 720
