@@ -2,8 +2,7 @@
 
 Linux 向けの SRT 受信サーバーです。受信した映像を v4l2loopback デバイスへ流し込みます。
 
-このアプリは、送信側が未接続でも映像出力を止めません。
-起動直後・切断時・受信停止時はダミー画像を連続送出し、デバイスを常に Capture として認識させ続けます。
+送信側が未接続でも映像出力を止めず、起動直後・切断時・受信停止時はダミー画像を連続送出します。これにより、デバイスを常に Capture として認識させ続けます。
 
 ## できること
 
@@ -11,80 +10,85 @@ Linux 向けの SRT 受信サーバーです。受信した映像を v4l2loopbac
 - 受信映像を /dev/video10（設定可）へ出力
 - 音声は無視（映像のみ）
 - ライブ映像が無い間はダミー画像を出力
-- 以下の設定項目を変更可能
-	- listen_port
-	- srt_latency_ms
-	- loopback_device
-	- dummy_image
+- フレームサイズを固定パラメータで指定
+- `analyzeduration=0` を設定で利用可能（既定値 0）
 
 ## 前提条件
 
 1. Linux で v4l2loopback が使えること
+2. ffmpeg（SRT 対応ビルド）が使えること
+3. デバイスへ書き込み可能であること
 
-2. ループバックデバイスを作成
+v4l2loopback 作成例:
 
 ```bash
 sudo modprobe v4l2loopback video_nr=10 card_label=rstcam exclusive_caps=1
 ```
 
-3. デバイス確認
+確認:
 
 ```bash
 ls -l /dev/video10
 ```
 
-4. ffmpeg（SRT対応ビルド）を使用可能にする
+## セットアップ
 
-5. Nix を使う場合はこのリポジトリで次を実行
-
-```bash
-nix develop
-```
-
-## 初回セットアップ
-
-1. 設定ファイルを作成
+設定ファイルを作成:
 
 ```bash
 cp config.example.toml config.toml
 ```
 
-2. 必要なら config.toml を編集
-
-最小変更例:
+最小設定例（HD固定）:
 
 ```toml
 listen_port = 5000
 srt_latency_ms = 120
+latency_profile = "balanced"
 loopback_device = "/dev/video10"
 dummy_image = "dummy.png"
+frame_width = 1280
+frame_height = 720
+fps = 30
+ffmpeg_analyzeduration_us = 0
+ffmpeg_probesize_bytes = 32768
 ```
 
-## 起動方法
+低遅延寄り設定例:
 
-### Nix 環境で起動（推奨）
+```toml
+latency_profile = "ultra-low"
+srt_latency_ms = 30
+live_timeout_ms = 300
+live_channel_capacity = 1
+ffmpeg_analyzeduration_us = 0
+ffmpeg_probesize_bytes = 32768
+```
+
+## 起動
+
+Nix 環境で起動（推奨）:
 
 ```bash
 nix develop -c cargo run -- --config config.toml
 ```
 
-### 直接起動
+直接起動:
 
 ```bash
 cargo run -- --config config.toml
 ```
 
-## 動作確認手順
+## 動作確認
 
 1. 受信側として rstcam を起動
-
 2. 別ターミナルで送信開始
 
 ```bash
 ffmpeg -re -stream_loop -1 -i input.mp4 -an -c:v libx264 -f mpegts "srt://127.0.0.1:5000?pkt_size=1316"
 ```
 
-3. さらに別ターミナルでループバックを表示
+3. さらに別ターミナルでループバック表示
 
 ```bash
 ffplay -f v4l2 /dev/video10
@@ -92,27 +96,22 @@ ffplay -f v4l2 /dev/video10
 
 ## 期待される挙動
 
-1. 送信前
-- /dev/video10 にはダミー画像が表示され続ける
+1. 送信前: ダミー画像を表示し続ける
+2. 送信中: ダミーからライブ映像へ切り替わる
+3. 送信停止時: ライブからダミーへ自動復帰し、待受継続
 
-2. 送信中
-- ダミー画像からライブ映像へ切り替わる
+## 主な設定項目
 
-3. 送信停止時
-- ライブ映像からダミー画像へ自動復帰する
-- アプリは終了せず待受継続する
+- `listen_port`: SRT LISTEN ポート
+- `srt_latency_ms`: SRT レイテンシ
+- `frame_width`, `frame_height`: 固定フレームサイズ（既定 HD）
+- `fps`: 出力 FPS
+- `loopback_device`: ループバックデバイス
+- `dummy_image`: ダミー画像パス
+- `ffmpeg_analyzeduration_us`: ffmpeg の analyzeduration
+- `ffmpeg_probesize_bytes`: ffmpeg の probesize
 
-## 主な CLI オプション
-
-```bash
-rstcam --config config.toml \
-	--listen-port 5000 \
-	--srt-latency-ms 120 \
-	--loopback-device /dev/video10 \
-	--dummy-image dummy.png
-```
-
-設定ファイル値より CLI 値が優先されます。
+CLI は設定ファイルより優先されます。
 
 ## トラブルシュート
 
@@ -121,17 +120,14 @@ rstcam --config config.toml \
 
 2. 映像が出ない
 - ffmpeg が SRT 対応か確認
-- 送信側 URL と listen_port が一致しているか確認
+- 送信側 URL と `listen_port` が一致しているか確認
+- 入力映像と `frame_width`/`frame_height` の差が大きい場合、まず HD で確認
 
 3. 権限エラー
 - /dev/video10 の書き込み権限を確認
-- 必要に応じて video グループへユーザーを追加
+- 必要に応じて video グループへユーザー追加
 
-4. CPU 使用率が高い
-- まず解像度や fps を下げる
-- 将来的に AMD Radeon の VA-API 経路を追加可能
-
-## 補足
-
-- 現在は安定動作優先で CPU デコード経路を採用
-- VA-API は必要時にオプションとして追加する想定
+4. 遅延が大きい
+- `latency_profile = "ultra-low"` を使用
+- `srt_latency_ms` を 20-40 で調整
+- 送信側を `-tune zerolatency -bf 0` で低遅延化

@@ -1,10 +1,12 @@
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use crossbeam_channel::Receiver;
+use crossbeam_channel::{Receiver, Sender};
 use tracing::{info, warn};
 use v4l::FourCC;
 use v4l::video::Output;
@@ -12,7 +14,13 @@ use v4l::video::Output;
 use crate::config::AppConfig;
 use crate::live::LiveEvent;
 
-pub fn run_output_loop(cfg: &AppConfig, dummy_frame: Vec<u8>, rx: Receiver<LiveEvent>) -> Result<()> {
+pub fn run_output_loop(
+    cfg: &AppConfig,
+    dummy_frame: Vec<u8>,
+    rx: Receiver<LiveEvent>,
+    recycle_tx: Sender<Vec<u8>>,
+    shutdown: Arc<AtomicBool>,
+) -> Result<()> {
     let mut out = open_device(cfg)?;
     let frame_interval = cfg.frame_interval();
     let live_timeout = Duration::from_millis(cfg.live_timeout_ms);
@@ -24,12 +32,20 @@ pub fn run_output_loop(cfg: &AppConfig, dummy_frame: Vec<u8>, rx: Receiver<LiveE
     info!("starting output loop");
 
     loop {
+        if shutdown.load(Ordering::SeqCst) {
+            info!("shutdown signal received; releasing loopback device");
+            drop(out);
+            return Ok(());
+        }
+
         let cycle_start = Instant::now();
 
         while let Ok(event) = rx.try_recv() {
             match event {
                 LiveEvent::Frame(frame) => {
-                    last_live_frame = Some(frame);
+                    if let Some(old) = last_live_frame.replace(frame) {
+                        let _ = recycle_tx.try_send(old);
+                    }
                     last_live_at = Some(Instant::now());
                 }
                 LiveEvent::StreamUp => {
@@ -62,10 +78,6 @@ pub fn run_output_loop(cfg: &AppConfig, dummy_frame: Vec<u8>, rx: Receiver<LiveE
             continue;
         }
 
-        if let Err(err) = out.flush() {
-            warn!(error = %err, "flush failed");
-        }
-
         let elapsed = cycle_start.elapsed();
         if elapsed < frame_interval {
             thread::sleep(frame_interval - elapsed);
@@ -88,8 +100,8 @@ fn configure_v4l2(cfg: &AppConfig) -> Result<()> {
     let mut fmt = dev
         .format()
         .context("failed to read current v4l2 format")?;
-    fmt.width = cfg.width;
-    fmt.height = cfg.height;
+    fmt.width = cfg.frame_width;
+    fmt.height = cfg.frame_height;
     fmt.fourcc = FourCC::new(b"YUYV");
 
     let applied = dev

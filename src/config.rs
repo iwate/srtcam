@@ -2,7 +2,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde::Deserialize;
 
 #[derive(Debug, Clone)]
@@ -11,11 +11,31 @@ pub struct AppConfig {
     pub srt_latency_ms: u32,
     pub loopback_device: PathBuf,
     pub dummy_image: PathBuf,
-    pub width: u32,
-    pub height: u32,
+    pub frame_width: u32,
+    pub frame_height: u32,
     pub fps: u32,
     pub live_timeout_ms: u64,
+    pub live_channel_capacity: usize,
+    pub latency_profile: LatencyProfile,
+    pub ffmpeg_analyzeduration_us: u64,
+    pub ffmpeg_probesize_bytes: u64,
     pub ffmpeg_bin: String,
+    pub enable_hwaccel: bool,
+    pub live_backend: LiveBackend,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LatencyProfile {
+    Balanced,
+    UltraLow,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum LiveBackend {
+    Subprocess,
+    FfmpegNext,
 }
 
 #[derive(Debug, Parser)]
@@ -32,6 +52,10 @@ pub struct Cli {
     #[arg(long)]
     pub dummy_image: Option<PathBuf>,
     #[arg(long)]
+    pub frame_width: Option<u32>,
+    #[arg(long)]
+    pub frame_height: Option<u32>,
+    #[arg(long)]
     pub width: Option<u32>,
     #[arg(long)]
     pub height: Option<u32>,
@@ -40,7 +64,19 @@ pub struct Cli {
     #[arg(long)]
     pub live_timeout_ms: Option<u64>,
     #[arg(long)]
+    pub live_channel_capacity: Option<usize>,
+    #[arg(long, value_enum)]
+    pub latency_profile: Option<LatencyProfile>,
+    #[arg(long)]
+    pub ffmpeg_analyzeduration_us: Option<u64>,
+    #[arg(long)]
+    pub ffmpeg_probesize_bytes: Option<u64>,
+    #[arg(long)]
     pub ffmpeg_bin: Option<String>,
+    #[arg(long)]
+    pub enable_hwaccel: Option<bool>,
+    #[arg(long, value_enum)]
+    pub live_backend: Option<LiveBackend>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -49,11 +85,19 @@ struct FileConfig {
     srt_latency_ms: Option<u32>,
     loopback_device: Option<PathBuf>,
     dummy_image: Option<PathBuf>,
+    frame_width: Option<u32>,
+    frame_height: Option<u32>,
     width: Option<u32>,
     height: Option<u32>,
     fps: Option<u32>,
     live_timeout_ms: Option<u64>,
+    live_channel_capacity: Option<usize>,
+    latency_profile: Option<LatencyProfile>,
+    ffmpeg_analyzeduration_us: Option<u64>,
+    ffmpeg_probesize_bytes: Option<u64>,
     ffmpeg_bin: Option<String>,
+    enable_hwaccel: Option<bool>,
+    live_backend: Option<LiveBackend>,
 }
 
 impl AppConfig {
@@ -67,6 +111,24 @@ impl AppConfig {
             FileConfig::default()
         };
 
+        let latency_profile = cli
+            .latency_profile
+            .or(file_cfg.latency_profile)
+            .unwrap_or(LatencyProfile::Balanced);
+
+        let default_srt_latency_ms = match latency_profile {
+            LatencyProfile::Balanced => 120,
+            LatencyProfile::UltraLow => 30,
+        };
+        let default_live_timeout_ms = match latency_profile {
+            LatencyProfile::Balanced => 800,
+            LatencyProfile::UltraLow => 300,
+        };
+        let default_live_channel_capacity = match latency_profile {
+            LatencyProfile::Balanced => 4,
+            LatencyProfile::UltraLow => 1,
+        };
+
         let cfg = Self {
             listen_port: cli
                 .listen_port
@@ -75,7 +137,7 @@ impl AppConfig {
             srt_latency_ms: cli
                 .srt_latency_ms
                 .or(file_cfg.srt_latency_ms)
-                .unwrap_or(120),
+                .unwrap_or(default_srt_latency_ms),
             loopback_device: cli
                 .loopback_device
                 .or(file_cfg.loopback_device)
@@ -84,17 +146,48 @@ impl AppConfig {
                 .dummy_image
                 .or(file_cfg.dummy_image)
                 .unwrap_or_else(|| PathBuf::from("dummy.png")),
-            width: cli.width.or(file_cfg.width).unwrap_or(1280),
-            height: cli.height.or(file_cfg.height).unwrap_or(720),
+            frame_width: cli
+                .frame_width
+                .or(cli.width)
+                .or(file_cfg.frame_width)
+                .or(file_cfg.width)
+                .unwrap_or(1280),
+            frame_height: cli
+                .frame_height
+                .or(cli.height)
+                .or(file_cfg.frame_height)
+                .or(file_cfg.height)
+                .unwrap_or(720),
             fps: cli.fps.or(file_cfg.fps).unwrap_or(30),
             live_timeout_ms: cli
                 .live_timeout_ms
                 .or(file_cfg.live_timeout_ms)
-                .unwrap_or(800),
+                .unwrap_or(default_live_timeout_ms),
+            live_channel_capacity: cli
+                .live_channel_capacity
+                .or(file_cfg.live_channel_capacity)
+                .unwrap_or(default_live_channel_capacity),
+            latency_profile,
+            ffmpeg_analyzeduration_us: cli
+                .ffmpeg_analyzeduration_us
+                .or(file_cfg.ffmpeg_analyzeduration_us)
+                .unwrap_or(0),
+            ffmpeg_probesize_bytes: cli
+                .ffmpeg_probesize_bytes
+                .or(file_cfg.ffmpeg_probesize_bytes)
+                .unwrap_or(500_000),
             ffmpeg_bin: cli
                 .ffmpeg_bin
                 .or(file_cfg.ffmpeg_bin)
                 .unwrap_or_else(|| "ffmpeg".to_string()),
+            enable_hwaccel: cli
+                .enable_hwaccel
+                .or(file_cfg.enable_hwaccel)
+                .unwrap_or(true),
+            live_backend: cli
+                .live_backend
+                .or(file_cfg.live_backend)
+                .unwrap_or(LiveBackend::Subprocess),
         };
 
         cfg.validate()?;
@@ -108,11 +201,17 @@ impl AppConfig {
         if self.fps == 0 {
             anyhow::bail!("fps must be > 0");
         }
-        if self.width == 0 || self.height == 0 {
-            anyhow::bail!("width/height must be > 0");
+        if self.frame_width == 0 || self.frame_height == 0 {
+            anyhow::bail!("frame_width/frame_height must be > 0");
         }
         if self.srt_latency_ms == 0 {
             anyhow::bail!("srt_latency_ms must be > 0");
+        }
+        if self.live_channel_capacity == 0 {
+            anyhow::bail!("live_channel_capacity must be > 0");
+        }
+        if self.ffmpeg_probesize_bytes == 0 {
+            anyhow::bail!("ffmpeg_probesize_bytes must be > 0");
         }
         if !self.loopback_device.exists() {
             anyhow::bail!(
@@ -128,7 +227,7 @@ impl AppConfig {
 
     pub fn frame_size_bytes(&self) -> usize {
         // yuyv422 => 2 bytes per pixel
-        (self.width as usize) * (self.height as usize) * 2
+        (self.frame_width as usize) * (self.frame_height as usize) * 2
     }
 
     pub fn frame_interval(&self) -> std::time::Duration {

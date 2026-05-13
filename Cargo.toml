@@ -14,5 +14,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 crossbeam-channel = "0.5"
+ctrlc = "3"
 which = "7.0"
 v4l = "0.14"
+ffmpeg-next = { version = "8", optional = true }
+
+[features]
+default = []
+ffmpeg-next-backend = ["dep:ffmpeg-next"]

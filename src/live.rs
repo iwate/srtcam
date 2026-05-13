@@ -4,7 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use crossbeam_channel::Sender;
+use crossbeam_channel::{Receiver, Sender, TrySendError};
 use tracing::{info, warn};
 
 use crate::config::AppConfig;
@@ -16,7 +16,11 @@ pub enum LiveEvent {
     StreamDown,
 }
 
-pub fn spawn_live_reader(cfg: AppConfig, tx: Sender<LiveEvent>) -> Result<thread::JoinHandle<()>> {
+pub fn spawn_live_reader(
+    cfg: AppConfig,
+    tx: Sender<LiveEvent>,
+    recycle_rx: Receiver<Vec<u8>>,
+) -> Result<thread::JoinHandle<()>> {
     let ffmpeg_bin = which::which(&cfg.ffmpeg_bin)
         .with_context(|| format!("failed to locate ffmpeg binary: {}", cfg.ffmpeg_bin))?;
     let ffmpeg_bin = ffmpeg_bin.to_string_lossy().to_string();
@@ -30,27 +34,31 @@ pub fn spawn_live_reader(cfg: AppConfig, tx: Sender<LiveEvent>) -> Result<thread
                 cfg.listen_port, cfg.srt_latency_ms
             );
 
-            let mut child = match Command::new(&ffmpeg_bin)
-                .args([
-                    "-loglevel",
-                    "warning",
-                    "-fflags",
-                    "nobuffer",
-                    "-flags",
-                    "low_delay",
-                    "-i",
-                    &srt_url,
-                    "-an",
-                    "-sn",
-                    "-dn",
-                    "-vf",
-                    &format!("scale={}:{},fps={}", cfg.width, cfg.height, cfg.fps),
-                    "-pix_fmt",
-                    "yuyv422",
-                    "-f",
-                    "rawvideo",
-                    "pipe:1",
-                ])
+            let mut cmd = Command::new(&ffmpeg_bin);
+            cmd.arg("-loglevel").arg("warning");
+            cmd.arg("-fflags").arg("nobuffer");
+            cmd.arg("-flags").arg("low_delay");
+            cmd.arg("-probesize")
+                .arg(cfg.ffmpeg_probesize_bytes.to_string());
+            cmd.arg("-analyzeduration")
+                .arg(cfg.ffmpeg_analyzeduration_us.to_string());
+            cmd.arg("-max_delay").arg("0");
+            
+            if cfg.enable_hwaccel {
+                cmd.arg("-hwaccel").arg("vaapi");
+                cmd.arg("-hwaccel_output_format").arg("nv12");
+            }
+
+            let mut child = match cmd
+                .arg("-i")
+                .arg(&srt_url)
+                .args(["-an", "-sn", "-dn"])
+                .arg("-vf")
+                .arg(format!(
+                    "scale={}:{}:flags=fast_bilinear,fps={}",
+                    cfg.frame_width, cfg.frame_height, cfg.fps
+                ))
+                .args(["-pix_fmt", "yuyv422", "-f", "rawvideo", "pipe:1"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -75,7 +83,9 @@ pub fn spawn_live_reader(cfg: AppConfig, tx: Sender<LiveEvent>) -> Result<thread
 
             info!("waiting for SRT stream on configured port");
             let mut had_live = false;
-            let mut frame = vec![0u8; frame_size];
+            let mut frame = recycle_rx
+                .try_recv()
+                .unwrap_or_else(|_| vec![0u8; frame_size]);
 
             loop {
                 match stdout.read_exact(&mut frame) {
@@ -84,9 +94,25 @@ pub fn spawn_live_reader(cfg: AppConfig, tx: Sender<LiveEvent>) -> Result<thread
                             had_live = true;
                             let _ = tx.send(LiveEvent::StreamUp);
                         }
-                        // Best effort: if channel is full, drop the oldest by retrying once.
-                        if tx.try_send(LiveEvent::Frame(frame.clone())).is_err() {
-                            let _ = tx.send(LiveEvent::Frame(frame.clone()));
+                        // Do not block on producer side; dropping old/new frames is better than latency buildup.
+                        let send_frame = frame;
+                        frame = recycle_rx
+                            .try_recv()
+                            .unwrap_or_else(|_| vec![0u8; frame_size]);
+
+                        match tx.try_send(LiveEvent::Frame(send_frame)) {
+                            Ok(()) => {
+                            }
+                            Err(TrySendError::Full(event)) => {
+                                if let LiveEvent::Frame(unsent) = event {
+                                    frame = unsent;
+                                }
+                            }
+                            Err(TrySendError::Disconnected(_)) => {
+                                let _ = child.kill();
+                                let _ = child.wait();
+                                return;
+                            }
                         }
                     }
                     Err(err) => {

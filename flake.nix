@@ -20,11 +20,15 @@
           clang
           llvmPackages.libclang
           ffmpeg
+          ffmpeg.dev
           srt
           libv4l
+          libva
+          intel-media-driver
         ];
 
         LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+        BINDGEN_EXTRA_CLANG_ARGS = "-I${pkgs.ffmpeg.dev}/include";
       };
 
       packages.${system}.default = pkgs.writeShellScriptBin "rstcam-info" ''

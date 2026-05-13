@@ -2,10 +2,10 @@
 listen_port = 5000
 
 # SRT receiver latency in milliseconds
-srt_latency_ms = 120
+srt_latency_ms = 40
 
 # Latency profile: "balanced" | "ultra-low"
-latency_profile = "balanced"
+latency_profile = "ultra-low"
 
 # v4l2loopback output device
 loopback_device = "/dev/video10"
@@ -23,11 +23,11 @@ frame_height = 720
 fps = 30
 
 # If no live frame arrives within this time, fallback to dummy
-live_timeout_ms = 800
+live_timeout_ms = 300
 
 # Internal frame channel size.
 # In ultra-low mode, 1 is recommended to avoid queue-induced lag.
-live_channel_capacity = 4
+live_channel_capacity = 1
 
 # FFmpeg demux/decode probe settings for startup latency control.
 # analyzeduration=0 skips time-based analysis; MPEG-TS PAT/PMT are found
@@ -45,5 +45,4 @@ enable_hwaccel = true
 # Live ingest backend: "subprocess" | "ffmpeg-next"
 # "ffmpeg-next" links libav in-process for lower IPC overhead.
 # It requires build feature: --features ffmpeg-next-backend
-live_backend = "subprocess"
-
+live_backend = "ffmpeg-next"
