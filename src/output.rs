@@ -12,7 +12,7 @@ use v4l::FourCC;
 use v4l::video::Output;
 
 use crate::config::AppConfig;
-use crate::live::LiveEvent;
+use crate::live_event::LiveEvent;
 
 pub fn run_output_loop(
     cfg: &AppConfig,

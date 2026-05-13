@@ -13,7 +13,7 @@ use tracing::{info, warn};
 
 use crate::backoff::{ExponentialBackoff, wait_or_shutdown};
 use crate::config::AppConfig;
-use crate::live::LiveEvent;
+use crate::live_event::LiveEvent;
 
 const INTERRUPT_REASON_NONE: u8 = 0;
 const INTERRUPT_REASON_IDLE: u8 = 1;

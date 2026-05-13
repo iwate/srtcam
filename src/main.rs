@@ -1,26 +1,21 @@
 mod backoff;
 mod config;
 mod dummy;
-mod live;
-#[cfg(feature = "ffmpeg-next-backend")]
 mod live_ffmpeg_next;
+mod live_event;
 mod output;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-#[cfg(not(feature = "ffmpeg-next-backend"))]
-use anyhow::bail;
 use clap::Parser;
 use crossbeam_channel::bounded;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
-use crate::config::{AppConfig, Cli, LiveBackend};
+use crate::config::{AppConfig, Cli};
 use crate::dummy::load_dummy_yuyv;
-use crate::live::spawn_live_reader;
-#[cfg(feature = "ffmpeg-next-backend")]
 use crate::live_ffmpeg_next::spawn_live_reader_ffmpeg_next;
 use crate::output::run_output_loop;
 
@@ -41,8 +36,6 @@ fn main() -> Result<()> {
         frame_width = cfg.frame_width,
         frame_height = cfg.frame_height,
         fps = cfg.fps,
-        hwaccel = cfg.enable_hwaccel,
-        backend = ?cfg.live_backend,
         "rstcam starting"
     );
 
@@ -58,23 +51,8 @@ fn main() -> Result<()> {
 
     let (tx, rx) = bounded(cfg.live_channel_capacity);
     let (recycle_tx, recycle_rx) = bounded::<Vec<u8>>(2);
-    let _live_handle = match cfg.live_backend {
-        LiveBackend::Subprocess => {
-            spawn_live_reader(cfg.clone(), tx, recycle_rx, Arc::clone(&shutdown))?
-        }
-        LiveBackend::FfmpegNext => {
-            #[cfg(feature = "ffmpeg-next-backend")]
-            {
-                spawn_live_reader_ffmpeg_next(cfg.clone(), tx, recycle_rx, Arc::clone(&shutdown))?
-            }
-            #[cfg(not(feature = "ffmpeg-next-backend"))]
-            {
-                bail!(
-                    "live_backend=ffmpeg-next requires build feature 'ffmpeg-next-backend'"
-                )
-            }
-        }
-    };
+    let _live_handle =
+        spawn_live_reader_ffmpeg_next(cfg.clone(), tx, recycle_rx, Arc::clone(&shutdown))?;
 
     run_output_loop(&cfg, dummy_frame, rx, recycle_tx, shutdown)
 }

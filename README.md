@@ -16,7 +16,7 @@ Linux 向けの SRT 受信サーバーです。受信した映像を v4l2loopbac
 ## 前提条件
 
 1. Linux で v4l2loopback が使えること
-2. ffmpeg（SRT 対応ビルド）が使えること
+2. FFmpeg ライブラリ（libavformat/libavcodec など）が利用可能であること
 3. デバイスへ書き込み可能であること
 
 v4l2loopback 作成例:

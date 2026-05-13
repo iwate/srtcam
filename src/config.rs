@@ -19,9 +19,6 @@ pub struct AppConfig {
     pub latency_profile: LatencyProfile,
     pub ffmpeg_analyzeduration_us: u64,
     pub ffmpeg_probesize_bytes: u64,
-    pub ffmpeg_bin: String,
-    pub enable_hwaccel: bool,
-    pub live_backend: LiveBackend,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum, Deserialize)]
@@ -29,13 +26,6 @@ pub struct AppConfig {
 pub enum LatencyProfile {
     Balanced,
     UltraLow,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum LiveBackend {
-    Subprocess,
-    FfmpegNext,
 }
 
 #[derive(Debug, Parser)]
@@ -71,12 +61,6 @@ pub struct Cli {
     pub ffmpeg_analyzeduration_us: Option<u64>,
     #[arg(long)]
     pub ffmpeg_probesize_bytes: Option<u64>,
-    #[arg(long)]
-    pub ffmpeg_bin: Option<String>,
-    #[arg(long)]
-    pub enable_hwaccel: Option<bool>,
-    #[arg(long, value_enum)]
-    pub live_backend: Option<LiveBackend>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -95,9 +79,6 @@ struct FileConfig {
     latency_profile: Option<LatencyProfile>,
     ffmpeg_analyzeduration_us: Option<u64>,
     ffmpeg_probesize_bytes: Option<u64>,
-    ffmpeg_bin: Option<String>,
-    enable_hwaccel: Option<bool>,
-    live_backend: Option<LiveBackend>,
 }
 
 impl AppConfig {
@@ -176,18 +157,6 @@ impl AppConfig {
                 .ffmpeg_probesize_bytes
                 .or(file_cfg.ffmpeg_probesize_bytes)
                 .unwrap_or(500_000),
-            ffmpeg_bin: cli
-                .ffmpeg_bin
-                .or(file_cfg.ffmpeg_bin)
-                .unwrap_or_else(|| "ffmpeg".to_string()),
-            enable_hwaccel: cli
-                .enable_hwaccel
-                .or(file_cfg.enable_hwaccel)
-                .unwrap_or(true),
-            live_backend: cli
-                .live_backend
-                .or(file_cfg.live_backend)
-                .unwrap_or(LiveBackend::Subprocess),
         };
 
         cfg.validate()?;

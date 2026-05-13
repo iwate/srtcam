@@ -35,15 +35,3 @@ live_channel_capacity = 4
 ffmpeg_analyzeduration_us = 0
 ffmpeg_probesize_bytes = 500000
 
-# ffmpeg binary name/path
-ffmpeg_bin = "ffmpeg"
-
-# Enable VA-API hardware video decode acceleration (if available).
-# Set to false if you encounter hwaccel errors or lack compatible GPU.
-enable_hwaccel = true
-
-# Live ingest backend: "subprocess" | "ffmpeg-next"
-# "ffmpeg-next" links libav in-process for lower IPC overhead.
-# It requires build feature: --features ffmpeg-next-backend
-live_backend = "subprocess"
-
