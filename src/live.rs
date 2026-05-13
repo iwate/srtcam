@@ -1,5 +1,7 @@
 use std::io::Read;
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::Duration;
 
@@ -7,6 +9,7 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, Sender, TrySendError};
 use tracing::{info, warn};
 
+use crate::backoff::{ExponentialBackoff, wait_or_shutdown};
 use crate::config::AppConfig;
 
 #[derive(Debug)]
@@ -20,6 +23,7 @@ pub fn spawn_live_reader(
     cfg: AppConfig,
     tx: Sender<LiveEvent>,
     recycle_rx: Receiver<Vec<u8>>,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<thread::JoinHandle<()>> {
     let ffmpeg_bin = which::which(&cfg.ffmpeg_bin)
         .with_context(|| format!("failed to locate ffmpeg binary: {}", cfg.ffmpeg_bin))?;
@@ -27,8 +31,14 @@ pub fn spawn_live_reader(
 
     let handle = thread::spawn(move || {
         let frame_size = cfg.frame_size_bytes();
+        let mut reconnect_backoff =
+            ExponentialBackoff::new(Duration::from_millis(300), Duration::from_secs(30), 1.5);
 
         loop {
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+
             let srt_url = format!(
                 "srt://0.0.0.0:{}?mode=listener&latency={}",
                 cfg.listen_port, cfg.srt_latency_ms
@@ -65,8 +75,15 @@ pub fn spawn_live_reader(
             {
                 Ok(c) => c,
                 Err(err) => {
-                    warn!(error = %err, "failed to start ffmpeg; retrying");
-                    thread::sleep(Duration::from_millis(1000));
+                    let delay = reconnect_backoff.next_delay();
+                    warn!(
+                        error = %err,
+                        delay_ms = delay.as_millis(),
+                        "failed to start ffmpeg; retrying with backoff"
+                    );
+                    if !wait_or_shutdown(delay, &shutdown) {
+                        break;
+                    }
                     continue;
                 }
             };
@@ -76,7 +93,11 @@ pub fn spawn_live_reader(
                 None => {
                     warn!("ffmpeg stdout unavailable");
                     let _ = child.kill();
-                    thread::sleep(Duration::from_millis(500));
+                    let _ = child.wait();
+                    let delay = reconnect_backoff.next_delay();
+                    if !wait_or_shutdown(delay, &shutdown) {
+                        break;
+                    }
                     continue;
                 }
             };
@@ -92,6 +113,7 @@ pub fn spawn_live_reader(
                     Ok(()) => {
                         if !had_live {
                             had_live = true;
+                            reconnect_backoff.reset();
                             let _ = tx.send(LiveEvent::StreamUp);
                         }
                         // Do not block on producer side; dropping old/new frames is better than latency buildup.
@@ -116,18 +138,29 @@ pub fn spawn_live_reader(
                         }
                     }
                     Err(err) => {
-                        if had_live {
-                            let _ = tx.send(LiveEvent::StreamDown);
-                        }
+                        // Always notify StreamDown regardless of had_live.
+                        let _ = tx.send(LiveEvent::StreamDown);
                         warn!(error = %err, "live stream ended or decode stalled; restarting listener");
                         break;
                     }
+                }
+
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
                 }
             }
 
             let _ = child.kill();
             let _ = child.wait();
-            thread::sleep(Duration::from_millis(300));
+
+            if shutdown.load(Ordering::SeqCst) {
+                break;
+            }
+
+            let delay = reconnect_backoff.next_delay();
+            if !wait_or_shutdown(delay, &shutdown) {
+                break;
+            }
         }
     });
 

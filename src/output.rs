@@ -6,7 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use crossbeam_channel::{Receiver, Sender};
+use crossbeam_channel::{Receiver, RecvTimeoutError, Sender};
 use tracing::{info, warn};
 use v4l::FourCC;
 use v4l::video::Output;
@@ -22,7 +22,8 @@ pub fn run_output_loop(
     shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
     let mut out = open_device(cfg)?;
-    let frame_interval = cfg.frame_interval();
+    let live_interval = cfg.frame_interval();
+    let dummy_interval = Duration::from_millis(5000); // 0.2 fps for static dummy image
     let live_timeout = Duration::from_millis(cfg.live_timeout_ms);
 
     let mut last_live_frame: Option<Vec<u8>> = None;
@@ -40,23 +41,18 @@ pub fn run_output_loop(
 
         let cycle_start = Instant::now();
 
-        while let Ok(event) = rx.try_recv() {
-            match event {
-                LiveEvent::Frame(frame) => {
-                    if let Some(old) = last_live_frame.replace(frame) {
-                        let _ = recycle_tx.try_send(old);
-                    }
-                    last_live_at = Some(Instant::now());
-                }
-                LiveEvent::StreamUp => {
-                    live_active = true;
-                    info!("stream state: live");
-                }
-                LiveEvent::StreamDown => {
-                    live_active = false;
-                    info!("stream state: dummy (disconnected)");
-                }
+        // In dummy mode block on recv_timeout so we wake immediately on StreamUp
+        // instead of spinning or sleeping through the full dummy interval.
+        // In live mode drain non-blocking.
+        if !live_active {
+            match rx.recv_timeout(dummy_interval) {
+                Ok(event) => process_event(event, &mut last_live_frame, &mut last_live_at, &mut live_active, &recycle_tx),
+                Err(RecvTimeoutError::Disconnected) => return Ok(()),
+                Err(RecvTimeoutError::Timeout) => {}
             }
+        }
+        while let Ok(event) = rx.try_recv() {
+            process_event(event, &mut last_live_frame, &mut last_live_at, &mut live_active, &recycle_tx);
         }
 
         let should_use_live = live_active
@@ -74,13 +70,50 @@ pub fn run_output_loop(
         if let Err(err) = out.write_all(selected) {
             warn!(error = %err, "failed writing frame; attempting to reopen loopback device");
             thread::sleep(Duration::from_millis(100));
-            out = open_device(cfg)?;
+            match open_device(cfg) {
+                Ok(new_out) => out = new_out,
+                Err(err) => {
+                    warn!(error = %err, "failed to reopen loopback device; will retry next frame");
+                }
+            }
             continue;
         }
 
-        let elapsed = cycle_start.elapsed();
-        if elapsed < frame_interval {
-            thread::sleep(frame_interval - elapsed);
+        // In live mode pace to target fps; dummy mode already waited via recv_timeout.
+        // Always sleep live_interval when live_active to avoid CPU spin during
+        // the window between StreamUp and first Frame arrival, or after live_timeout.
+        if live_active {
+            let elapsed = cycle_start.elapsed();
+            if elapsed < live_interval {
+                thread::sleep(live_interval - elapsed);
+            }
+        }
+    }
+}
+
+fn process_event(
+    event: LiveEvent,
+    last_live_frame: &mut Option<Vec<u8>>,
+    last_live_at: &mut Option<Instant>,
+    live_active: &mut bool,
+    recycle_tx: &Sender<Vec<u8>>,
+) {
+    match event {
+        LiveEvent::Frame(frame) => {
+            if let Some(old) = last_live_frame.replace(frame) {
+                let _ = recycle_tx.try_send(old);
+            }
+            *last_live_at = Some(Instant::now());
+        }
+        LiveEvent::StreamUp => {
+            *live_active = true;
+            *last_live_at = Some(Instant::now());
+            info!("stream state: live");
+        }
+        LiveEvent::StreamDown => {
+            *live_active = false;
+            *last_live_at = None;
+            info!("stream state: dummy (disconnected)");
         }
     }
 }

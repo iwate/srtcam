@@ -1,3 +1,4 @@
+mod backoff;
 mod config;
 mod dummy;
 mod live;
@@ -58,11 +59,13 @@ fn main() -> Result<()> {
     let (tx, rx) = bounded(cfg.live_channel_capacity);
     let (recycle_tx, recycle_rx) = bounded::<Vec<u8>>(2);
     let _live_handle = match cfg.live_backend {
-        LiveBackend::Subprocess => spawn_live_reader(cfg.clone(), tx, recycle_rx)?,
+        LiveBackend::Subprocess => {
+            spawn_live_reader(cfg.clone(), tx, recycle_rx, Arc::clone(&shutdown))?
+        }
         LiveBackend::FfmpegNext => {
             #[cfg(feature = "ffmpeg-next-backend")]
             {
-                spawn_live_reader_ffmpeg_next(cfg.clone(), tx, recycle_rx)?
+                spawn_live_reader_ffmpeg_next(cfg.clone(), tx, recycle_rx, Arc::clone(&shutdown))?
             }
             #[cfg(not(feature = "ffmpeg-next-backend"))]
             {
