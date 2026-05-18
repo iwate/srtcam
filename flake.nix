@@ -31,7 +31,7 @@
         BINDGEN_EXTRA_CLANG_ARGS = "-I${pkgs.ffmpeg.dev}/include";
       };
 
-      packages.${system}.default = pkgs.writeShellScriptBin "rstcam-info" ''
+      packages.${system}.default = pkgs.writeShellScriptBin "srtcam-info" ''
         echo "Use: nix develop, then cargo run -- --config config.toml"
       '';
     };

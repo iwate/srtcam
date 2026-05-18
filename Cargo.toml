@@ -1,5 +1,5 @@
 [package]
-name = "rstcam"
+name = "srtcam"
 version = "0.1.0"
 edition = "2021"
 description = "SRT listener to v4l2loopback bridge with dummy fallback"

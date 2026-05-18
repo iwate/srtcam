@@ -36,7 +36,7 @@ fn main() -> Result<()> {
         frame_width = cfg.frame_width,
         frame_height = cfg.frame_height,
         fps = cfg.fps,
-        "rstcam starting"
+        "srtcam starting"
     );
 
     let shutdown = Arc::new(AtomicBool::new(false));

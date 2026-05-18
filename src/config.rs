@@ -28,7 +28,7 @@ pub enum LatencyProfile {
 }
 
 #[derive(Debug, Parser)]
-#[command(name = "rstcam", about = "SRT to v4l2loopback bridge")]
+#[command(name = "srtcam", about = "SRT to v4l2loopback bridge")]
 pub struct Cli {
     #[arg(long)]
     pub config: Option<PathBuf>,

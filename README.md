@@ -1,4 +1,4 @@
-# rstcam
+# srtcam
 
 Linux 向けの SRT 受信サーバーです。受信した映像を v4l2loopback デバイスへ流し込みます。
 
@@ -22,7 +22,7 @@ Linux 向けの SRT 受信サーバーです。受信した映像を v4l2loopbac
 v4l2loopback 作成例:
 
 ```bash
-sudo modprobe v4l2loopback video_nr=10 card_label=rstcam exclusive_caps=1
+sudo modprobe v4l2loopback video_nr=10 card_label=srtcam exclusive_caps=1
 ```
 
 確認:
@@ -80,7 +80,7 @@ cargo run -- --config config.toml
 
 ## 動作確認
 
-1. 受信側として rstcam を起動
+1. 受信側として srtcam を起動
 2. 別ターミナルで送信開始
 
 ```bash
